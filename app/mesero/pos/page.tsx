@@ -18,15 +18,22 @@ type Dish = {
   category: { name: string };
 };
 
+type SavedOrder = {
+  id: string;
+  status: string;
+  total: string;
+  items: { id: string; dishId: string; quantity: number; unitPrice: string; subtotal: string; notes: string | null; dish: { name: string } }[];
+};
+
 type Item = {
   dishId: string;
   quantity: number;
   notes: string;
 };
 
-async function api(path: string, body?: unknown) {
+async function api(path: string, body?: unknown, method?: "PATCH") {
   const response = await fetch(`/api/mesero/${path}`, {
-    method: body === undefined ? "GET" : "POST",
+    method: method ?? (body === undefined ? "GET" : "POST"),
     headers: {
       "Content-Type": "application/json",
     },
@@ -55,6 +62,8 @@ export default function POS() {
   const [email, setEmail] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [accountId, setAccountId] = useState("");
+  const [savedOrders, setSavedOrders] = useState<SavedOrder[]>([]);
+  const [editedQuantities, setEditedQuantities] = useState<Record<string, number>>({});
 
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
@@ -90,6 +99,8 @@ export default function POS() {
   function changeTable(id: string) {
     setTableId(id);
     setAccountId("");
+    setSavedOrders([]);
+    setEditedQuantities({});
     setItems([]);
     setEmail("");
     setMessage("");
@@ -166,6 +177,7 @@ export default function POS() {
       });
 
       setAccountId(result.id);
+      await loadOrders(result.id);
       setMessage("Cuenta abierta correctamente.");
 
       await refresh();
@@ -208,6 +220,7 @@ export default function POS() {
       });
 
       setItems([]);
+      await loadOrders(accountId);
 
       setMessage(
         `Pedido ${result.id} registrado y enviado a cocina.`,
@@ -223,6 +236,40 @@ export default function POS() {
     } finally {
       setLoading(false);
     }
+  }
+
+
+  async function loadOrders(id: string) {
+    const orders: SavedOrder[] = await api(`accounts/${id}/orders`);
+    setSavedOrders(orders);
+    setEditedQuantities(Object.fromEntries(orders.flatMap(order => order.items.map(item => [item.id, item.quantity]))));
+  }
+
+  async function modifySavedOrder(order: SavedOrder) {
+    if (loading || order.status !== "RECEIVED") return;
+    const updated = order.items.map(item => ({ itemId: item.id, quantity: editedQuantities[item.id] ?? item.quantity }));
+    if (updated.some(item => !Number.isInteger(item.quantity) || item.quantity < 1)) {
+      setError("Las cantidades deben ser enteros mayores o iguales a 1."); return;
+    }
+    setLoading(true); setError(""); setMessage("");
+    try {
+      await api(`orders/${order.id}`, { items: updated }, "PATCH");
+      await loadOrders(accountId);
+      setMessage("Pedido actualizado y cocina notificada.");
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo modificar el pedido"); }
+    finally { setLoading(false); }
+  }
+
+  async function cancelSavedOrder(order: SavedOrder) {
+    if (loading || order.status !== "RECEIVED") return;
+    if (!window.confirm("¿Cancelar este pedido completo?")) return;
+    setLoading(true); setError(""); setMessage("");
+    try {
+      await api(`orders/${order.id}/cancel`, {}, "PATCH");
+      await loadOrders(accountId);
+      setMessage("Pedido cancelado y cocina notificada.");
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo cancelar el pedido"); }
+    finally { setLoading(false); }
   }
 
   const selected = tables.find(
@@ -449,6 +496,32 @@ export default function POS() {
             : "Enviar a cocina"}
         </button>
       </section>
+
+      {accountId && (
+        <section className="space-y-3 rounded-lg border p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-xl font-semibold">4. Modificar o cancelar pedidos de mesa (H6)</h2>
+            <button type="button" className="rounded border px-3 py-2" disabled={loading} onClick={() => void loadOrders(accountId).catch(err => setError(err instanceof Error ? err.message : "No se pudo consultar"))}>Actualizar lista</button>
+          </div>
+          {savedOrders.length === 0 && <p>No hay pedidos registrados en esta cuenta.</p>}
+          {savedOrders.map(order => (
+            <div key={order.id} className="space-y-3 rounded border p-3">
+              <p className="text-sm">Pedido {order.id} · Estado: <strong>{order.status}</strong> · Total: ${Number(order.total).toFixed(2)}</p>
+              {order.items.map(item => (
+                <label key={item.id} className="flex flex-wrap items-center justify-between gap-3">
+                  <span>{item.dish.name} · ${Number(item.unitPrice).toFixed(2)} por unidad</span>
+                  <input type="number" min={1} step={1} className="w-24 rounded border bg-transparent p-2" aria-label={`Cantidad de ${item.dish.name}`} value={editedQuantities[item.id] ?? item.quantity} disabled={loading || order.status !== "RECEIVED"} onChange={event => setEditedQuantities(previous => ({ ...previous, [item.id]: Number(event.target.value) }))} />
+                </label>
+              ))}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="rounded bg-violet-700 px-3 py-2 text-white disabled:opacity-50" disabled={loading || order.status !== "RECEIVED"} onClick={() => void modifySavedOrder(order)}>Guardar cantidades</button>
+                <button type="button" className="rounded bg-red-700 px-3 py-2 text-white disabled:opacity-50" disabled={loading || order.status !== "RECEIVED"} onClick={() => void cancelSavedOrder(order)}>Cancelar pedido</button>
+              </div>
+              {order.status !== "RECEIVED" && <p className="text-sm opacity-70">No se puede modificar ni cancelar: el pedido ya no está Recibido.</p>}
+            </div>
+          ))}
+        </section>
+      )}
 
       {error && (
         <p
