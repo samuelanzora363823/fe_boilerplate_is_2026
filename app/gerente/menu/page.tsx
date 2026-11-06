@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+type Categoria = { id: string; name: string };
+
 type Estado = "ACTIVE" | "DISABLED" | "OUT_OF_STOCK";
 
 type Platillo = {
@@ -77,6 +79,7 @@ async function leerRespuesta(respuesta: Response): Promise<unknown> {
 
 export default function MenuPage() {
   const [platillos, setPlatillos] = useState<Platillo[]>([]);
+  const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [cargando, setCargando] = useState(true);
 
@@ -126,6 +129,10 @@ export default function MenuPage() {
 
   useEffect(() => {
     void cargarPlatillos();
+    fetch("/api/menu/categories", { cache: "no-store" })
+      .then(async r => { if (!r.ok) throw new Error("No se pudieron consultar las categorías"); return r.json() as Promise<Categoria[]>; })
+      .then(setCategorias)
+      .catch((e: Error) => setError(e.message));
   }, [cargarPlatillos]);
 
   const actualizarCampo = (
@@ -475,24 +482,13 @@ export default function MenuPage() {
               </div>
 
               <div>
-                <label
-                  htmlFor="categoria"
-                  className="mb-2 block text-sm font-medium"
-                >
-                  Categoría (UUID)
-                </label>
-
-                <input
-                  id="categoria"
-                  type="text"
-                  required
-                  placeholder="UUID de la categoría"
-                  value={nuevoPlatillo.categoryId}
-                  onChange={(e) =>
-                    actualizarCampo("categoryId", e.target.value)
-                  }
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 p-3 outline-none focus:border-purple-500"
-                />
+                <label htmlFor="categoria" className="mb-2 block text-sm font-medium">Categoría</label>
+                <select id="categoria" required value={nuevoPlatillo.categoryId}
+                  onChange={e => actualizarCampo("categoryId", e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 p-3 outline-none focus:border-purple-500">
+                  <option value="">Seleccione categoría</option>
+                  {categorias.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
             </div>
 
@@ -615,7 +611,7 @@ export default function MenuPage() {
                     </td>
 
                     <td className="p-4 text-xs text-zinc-400">
-                      {platillo.categoryId}
+                      {categorias.find(c => c.id === platillo.categoryId)?.name ?? platillo.categoryId}
                     </td>
 
                     <td className="p-4">
