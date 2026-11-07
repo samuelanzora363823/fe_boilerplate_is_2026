@@ -64,6 +64,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
+    if (body.price !== undefined) body.price = String(body.price);
 
     const response = await fetch(
       `${API_URL.replace(/\/$/, "")}/menu`,
