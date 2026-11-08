@@ -470,10 +470,13 @@ export default function GerenteMenuPage() {
             Menú
           </Link>
 
-          <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-500">
+          <Link
+            href="/gerente/inventario/movimientos/nuevo"
+            className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-300 transition hover:bg-white/10"
+          >
             <Icono nombre="cuadro" />
             Inventario
-          </div>
+          </Link>
 
           <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-500">
             <Icono nombre="cuadro" />
