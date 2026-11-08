@@ -16,7 +16,7 @@ type Module = {
   title: string;
   href: string;
   description: string;
-  icon: "menu" | "pos" | "takeaway" | "view";
+  icon: "menu" | "pos" | "takeaway" | "view" | "inventory";
 };
 
 const modules: Record<UserRole, Module[]> = {
@@ -34,6 +34,13 @@ const modules: Record<UserRole, Module[]> = {
       description:
         "Consulta los platillos, precios y categorías disponibles.",
       icon: "view",
+    },
+    {
+      title: "Inventario",
+      href: "/gerente/inventario/movimientos/nuevo",
+      description:
+        "Registra las entradas y salidas de insumos de tu sucursal.",
+      icon: "inventory",
     },
   ],
   MESERO: [
@@ -75,7 +82,7 @@ function Icon({
   name,
   size = 22,
 }: {
-  name: "home" | "menu" | "pos" | "takeaway" | "view" | "logout" | "arrow";
+  name: "home" | "menu" | "pos" | "takeaway" | "view" | "inventory" | "logout" | "arrow";
   size?: number;
 }) {
   const props = {
@@ -127,6 +134,14 @@ function Icon({
         <svg {...props}>
           <rect x="4" y="3" width="16" height="18" rx="2" />
           <path d="M8 8h8M8 12h8M8 16h5" />
+        </svg>
+      );
+
+    case "inventory":
+      return (
+        <svg {...props}>
+          <path d="m3 7 9-4 9 4-9 4-9-4Z" />
+          <path d="M3 7v10l9 4 9-4V7M12 11v10" />
         </svg>
       );
 
