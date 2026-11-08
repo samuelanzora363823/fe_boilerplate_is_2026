@@ -140,6 +140,8 @@ const SIN_PERMISO =
 export default function RegistrarMovimientoPage() {
   const router = useRouter();
   const cargarUsuario = useSesion((estado) => estado.cargarUsuario);
+  const sucursal = useSesion((estado) => estado.sucursal);
+  const guardarSucursal = useSesion((estado) => estado.guardarSucursal);
   const [sinPermiso, setSinPermiso] = useState(false);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -184,8 +186,12 @@ export default function RegistrarMovimientoPage() {
         throw new Error("No se pudieron cargar los insumos.");
       }
 
-      const datos: Insumo[] = await respuesta.json();
-      setInsumos(datos);
+      const datos: {
+        data: Insumo[];
+        branch: { id: string; name: string };
+      } = await respuesta.json();
+      setInsumos(datos.data);
+      guardarSucursal(datos.branch);
     } catch (err) {
       setError(
         err instanceof Error
@@ -195,7 +201,7 @@ export default function RegistrarMovimientoPage() {
     } finally {
       setCargando(false);
     }
-  }, [cargarUsuario, router]);
+  }, [cargarUsuario, guardarSucursal, router]);
 
   useEffect(() => {
     // La carga se difiere para evitar setState
@@ -395,6 +401,11 @@ export default function RegistrarMovimientoPage() {
             <p className="mt-2 text-sm text-slate-500">
               Registra las entradas y salidas de insumos de tu sucursal.
             </p>
+            {sucursal && (
+              <span className="mt-3 inline-flex items-center gap-2 rounded-full bg-[#f0edff] px-3 py-1.5 text-xs font-semibold text-[#7564e8]">
+                Sucursal: {sucursal.name}
+              </span>
+            )}
           </div>
 
           {error && (

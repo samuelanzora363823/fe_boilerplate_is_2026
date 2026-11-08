@@ -2,8 +2,8 @@
 
 import { create } from "zustand";
 
-// Estado global de la sesión (decisión técnica del documento: Zustand).
-// La sucursal no viaja aquí: el backend la toma siempre de la sesión.
+// Estado global de la sesión (decisión técnica del documento: Zustand):
+// sesión, rol y sucursal del usuario.
 export type RolUsuario =
   | "GERENTE"
   | "MESERO"
@@ -17,14 +17,24 @@ export type UsuarioSesion = {
   role: RolUsuario;
 };
 
+export type SucursalSesion = {
+  id: string;
+  name: string;
+};
+
 type EstadoSesion = {
   usuario: UsuarioSesion | null;
+  sucursal: SucursalSesion | null;
   cargando: boolean;
   cargarUsuario: () => Promise<UsuarioSesion | null>;
+  // La sucursal la decide el backend a partir de la sesión;
+  // el frontend solo la guarda para mostrarla.
+  guardarSucursal: (sucursal: SucursalSesion) => void;
 };
 
 export const useSesion = create<EstadoSesion>((set, get) => ({
   usuario: null,
+  sucursal: null,
   cargando: false,
 
   cargarUsuario: async () => {
@@ -46,4 +56,6 @@ export const useSesion = create<EstadoSesion>((set, get) => ({
       set({ cargando: false });
     }
   },
+
+  guardarSucursal: (sucursal) => set({ sucursal }),
 }));
