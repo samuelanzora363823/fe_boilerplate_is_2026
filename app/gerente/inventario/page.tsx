@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useSesion } from "@/lib/stores/sesion";
+import BarraLateral from "@/app/components/BarraLateral";
 
 type Unidad = "KG" | "G" | "L" | "ML" | "UNIDAD";
 
@@ -50,19 +51,6 @@ function Icono({
   };
 
   switch (nombre) {
-    case "inicio":
-      return (
-        <svg {...base}>
-          <path d="m3 10 9-7 9 7v10H3z" />
-          <path d="M9 20v-7h6v7" />
-        </svg>
-      );
-    case "menu":
-      return (
-        <svg {...base}>
-          <path d="M4 5h16M4 12h16M4 19h16" />
-        </svg>
-      );
     case "inventario":
       return (
         <svg {...base}>
@@ -243,73 +231,7 @@ export default function InventarioPage() {
   return (
     <div className="min-h-screen bg-[#f5f6fb] text-slate-800 lg:flex">
       {/* BARRA LATERAL */}
-      <aside className="flex w-full flex-col bg-[#171b36] text-white lg:min-h-screen lg:w-64 lg:shrink-0">
-        <div className="border-b border-white/10 px-6 py-7">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#7564e8] text-xl font-bold">
-              N
-            </div>
-            <div>
-              <p className="text-lg font-bold tracking-tight">
-                Núcleo Digital
-              </p>
-              <p className="text-xs text-slate-400">
-                Sistema de restaurante
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex gap-2 overflow-x-auto p-4 lg:flex-col">
-          <Link
-            href="/"
-            className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-300 transition hover:bg-white/10"
-          >
-            <Icono nombre="inicio" />
-            Inicio
-          </Link>
-
-          <Link
-            href="/gerente/menu"
-            className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-300 transition hover:bg-white/10"
-          >
-            <Icono nombre="menu" />
-            Menú
-          </Link>
-
-          <Link
-            href="/gerente/inventario"
-            className="flex items-center gap-3 rounded-xl bg-[#7564e8] px-4 py-3 text-sm font-semibold text-white"
-          >
-            <Icono nombre="inventario" />
-            Inventario
-          </Link>
-
-          <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-500">
-            <Icono nombre="cuadro" />
-            Reportes
-          </div>
-
-          <div className="flex cursor-not-allowed items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-500">
-            <Icono nombre="cuadro" />
-            Configuración
-          </div>
-        </nav>
-
-        <div className="mt-auto hidden border-t border-white/10 p-5 lg:block">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#7564e8] font-semibold">
-              G
-            </div>
-            <div>
-              <p className="text-sm font-semibold">Gerente</p>
-              <p className="text-xs text-slate-400">
-                Administración
-              </p>
-            </div>
-          </div>
-        </div>
-      </aside>
+      <BarraLateral />
 
       {/* CONTENIDO PRINCIPAL */}
       <main className="min-w-0 flex-1 px-4 py-7 sm:px-7 lg:px-10">
