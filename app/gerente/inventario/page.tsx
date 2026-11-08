@@ -334,6 +334,10 @@ export default function InventarioPage() {
             </div>
 
             {!sinPermiso && (
+              <div className="flex flex-wrap gap-3">
+              <Link href="/gerente/inventario/alertas" className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">
+                <Icono nombre="alerta" size={18} /> Ver alertas
+              </Link>
               <Link
                 href="/gerente/inventario/movimientos/nuevo"
                 className="flex items-center gap-2 rounded-xl bg-[#7564e8] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#6250d5]"
@@ -341,6 +345,7 @@ export default function InventarioPage() {
                 <Icono nombre="mas" size={18} />
                 Registrar movimiento
               </Link>
+              </div>
             )}
           </div>
 
