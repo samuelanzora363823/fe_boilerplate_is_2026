@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useSesion } from "@/lib/stores/sesion";
 import BarraLateral from "@/app/components/BarraLateral";
+import CampanaNotificaciones from "@/app/components/CampanaNotificaciones";
 
 type Unidad = "KG" | "G" | "L" | "ML" | "UNIDAD";
 
@@ -255,8 +256,10 @@ export default function InventarioPage() {
               )}
             </div>
 
+            <div className="flex flex-wrap items-center gap-3">
+              <CampanaNotificaciones />
             {!sinPermiso && (
-              <div className="flex flex-wrap gap-3">
+              <>
               <Link href="/gerente/inventario/alertas" className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">
                 <Icono nombre="alerta" size={18} /> Ver alertas
               </Link>
@@ -267,8 +270,9 @@ export default function InventarioPage() {
                 <Icono nombre="mas" size={18} />
                 Registrar movimiento
               </Link>
-              </div>
+              </>
             )}
+            </div>
           </div>
 
           {sinPermiso ? (

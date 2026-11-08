@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useSesion } from "@/lib/stores/sesion";
 import BarraLateral from "@/app/components/BarraLateral";
+import CampanaNotificaciones from "@/app/components/CampanaNotificaciones";
 
 type Unidad = "KG" | "G" | "L" | "ML" | "UNIDAD";
 type TipoMovimiento = "ENTRADA" | "SALIDA";
@@ -307,7 +308,8 @@ export default function RegistrarMovimientoPage() {
       {/* CONTENIDO PRINCIPAL */}
       <main className="min-w-0 flex-1 px-4 py-7 sm:px-7 lg:px-10">
         <div className="mx-auto max-w-7xl">
-          <div className="mb-7">
+          <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
+          <div>
             <p className="mb-2 text-sm text-slate-400">
               Administración / Inventario / Registrar movimiento
             </p>
@@ -322,6 +324,8 @@ export default function RegistrarMovimientoPage() {
                 Sucursal: {sucursal.name}
               </span>
             )}
+          </div>
+          <CampanaNotificaciones />
           </div>
 
           {error && (

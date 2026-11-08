@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { useSesion } from "@/lib/stores/sesion";
+import type { RolUsuario } from "@/lib/stores/sesion";
 
-// Barra lateral compartida de las pantallas del gerente
-// (mismo diseño que /gerente/menu).
+// Barra lateral compartida (mismo diseño que /gerente/menu).
+// Las opciones dependen del rol de la sesión.
 
 type Opcion = {
   titulo: string;
@@ -12,13 +15,38 @@ type Opcion = {
   icono: string;
 };
 
-const opcionesGerente: Opcion[] = [
-  { titulo: "Inicio", href: "/", icono: "inicio" },
-  { titulo: "Menú", href: "/gerente/menu", icono: "menu" },
-  { titulo: "Inventario", href: "/gerente/inventario", icono: "inventario" },
-  { titulo: "Reportes", icono: "cuadro" },
-  { titulo: "Configuración", icono: "cuadro" },
-];
+const opcionesPorRol: Record<RolUsuario, Opcion[]> = {
+  GERENTE: [
+    { titulo: "Inicio", href: "/", icono: "inicio" },
+    { titulo: "Menú", href: "/gerente/menu", icono: "menu" },
+    { titulo: "Inventario", href: "/gerente/inventario", icono: "inventario" },
+    { titulo: "Reportes", icono: "cuadro" },
+    { titulo: "Configuración", icono: "cuadro" },
+  ],
+  MESERO: [
+    { titulo: "Inicio", href: "/", icono: "inicio" },
+    { titulo: "Punto de venta (POS)", href: "/mesero/pos", icono: "pos" },
+  ],
+  CLIENTE: [
+    { titulo: "Inicio", href: "/", icono: "inicio" },
+    { titulo: "Consultar menú", href: "/menu", icono: "menu" },
+    {
+      titulo: "Pedido para llevar",
+      href: "/cliente/pedido-para-llevar",
+      icono: "llevar",
+    },
+  ],
+  COCINA: [{ titulo: "Inicio", href: "/", icono: "inicio" }],
+  GERENTE_GENERAL: [{ titulo: "Inicio", href: "/", icono: "inicio" }],
+};
+
+const etiquetasRol: Record<RolUsuario, string> = {
+  GERENTE: "Gerente",
+  MESERO: "Mesero",
+  COCINA: "Cocina",
+  CLIENTE: "Cliente",
+  GERENTE_GENERAL: "Gerente general",
+};
 
 function Icono({ nombre, size = 20 }: { nombre: string; size?: number }) {
   const base = {
@@ -53,6 +81,20 @@ function Icono({ nombre, size = 20 }: { nombre: string; size?: number }) {
           <path d="M3 7v10l9 4 9-4V7M12 11v10" />
         </svg>
       );
+    case "pos":
+      return (
+        <svg {...base}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M3 10h18M8 15h3M15 15h2" />
+        </svg>
+      );
+    case "llevar":
+      return (
+        <svg {...base}>
+          <path d="M5 9h14l-1 12H6L5 9Z" />
+          <path d="M9 9V6a3 3 0 0 1 6 0v3" />
+        </svg>
+      );
     default:
       return (
         <svg {...base}>
@@ -64,6 +106,19 @@ function Icono({ nombre, size = 20 }: { nombre: string; size?: number }) {
 
 export default function BarraLateral() {
   const ruta = usePathname();
+  const usuario = useSesion((estado) => estado.usuario);
+  const cargarUsuario = useSesion((estado) => estado.cargarUsuario);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void cargarUsuario();
+    });
+  }, [cargarUsuario]);
+
+  const opciones = usuario
+    ? (opcionesPorRol[usuario.role] ?? opcionesPorRol.CLIENTE)
+    : [];
+  const rol = usuario ? (etiquetasRol[usuario.role] ?? usuario.role) : "";
 
   const activa = (href: string) =>
     href === "/" ? ruta === "/" : ruta.startsWith(href);
@@ -83,15 +138,15 @@ export default function BarraLateral() {
       </div>
 
       <nav className="flex gap-2 overflow-x-auto p-4 lg:flex-col">
-        {opcionesGerente.map((opcion) =>
+        {opciones.map((opcion) =>
           opcion.href ? (
             <Link
               key={opcion.titulo}
               href={opcion.href}
               className={
                 activa(opcion.href)
-                  ? "flex items-center gap-3 rounded-xl bg-[#7564e8] px-4 py-3 text-sm font-semibold text-white"
-                  : "flex items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-300 transition hover:bg-white/10"
+                  ? "flex shrink-0 items-center gap-3 rounded-xl bg-[#7564e8] px-4 py-3 text-sm font-semibold text-white"
+                  : "flex shrink-0 items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-300 transition hover:bg-white/10"
               }
             >
               <Icono nombre={opcion.icono} />
@@ -100,26 +155,28 @@ export default function BarraLateral() {
           ) : (
             <div
               key={opcion.titulo}
-              className="flex cursor-not-allowed items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-500"
+              className="flex shrink-0 cursor-not-allowed items-center gap-3 rounded-xl px-4 py-3 text-sm text-slate-500"
             >
               <Icono nombre={opcion.icono} />
               {opcion.titulo}
             </div>
-          )
+          ),
         )}
       </nav>
 
-      <div className="mt-auto hidden border-t border-white/10 p-5 lg:block">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#7564e8] font-semibold">
-            G
-          </div>
-          <div>
-            <p className="text-sm font-semibold">Gerente</p>
-            <p className="text-xs text-slate-400">Administración</p>
+      {usuario && (
+        <div className="mt-auto hidden border-t border-white/10 p-5 lg:block">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#7564e8] font-semibold">
+              {rol.charAt(0)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{rol}</p>
+              <p className="truncate text-xs text-slate-400">{usuario.email}</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </aside>
   );
 }

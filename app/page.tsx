@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { logout } from "@/app/actions/auth";
+import CampanaNotificaciones from "@/app/components/CampanaNotificaciones";
 import { getSession } from "@/lib/session";
 
 type UserRole = "GERENTE" | "MESERO" | "COCINA" | "CLIENTE";
@@ -278,15 +279,18 @@ export default async function Home() {
               </p>
             </div>
 
-            <form action={logout}>
-              <button
-                type="submit"
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-[#454b69] shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-              >
-                <Icon name="logout" size={18} />
-                Cerrar sesión
-              </button>
-            </form>
+            <div className="flex items-center gap-3">
+              <CampanaNotificaciones />
+              <form action={logout}>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-[#454b69] shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Icon name="logout" size={18} />
+                  Cerrar sesión
+                </button>
+              </form>
+            </div>
           </header>
 
           {/* INFORMACIÓN DEL USUARIO */}
