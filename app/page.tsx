@@ -5,7 +5,7 @@ import { logout } from "@/app/actions/auth";
 import CampanaNotificaciones from "@/app/components/CampanaNotificaciones";
 import { getSession } from "@/lib/session";
 
-type UserRole = "GERENTE" | "MESERO" | "COCINA" | "CLIENTE";
+type UserRole = "GERENTE" | "MESERO" | "COCINA" | "CLIENTE" | "GERENTE_GENERAL";
 
 type CurrentUser = {
   id: string;
@@ -17,7 +17,7 @@ type Module = {
   title: string;
   href: string;
   description: string;
-  icon: "menu" | "pos" | "takeaway" | "view" | "inventory";
+  icon: "menu" | "pos" | "takeaway" | "view" | "inventory" | "clock";
 };
 
 const modules: Record<UserRole, Module[]> = {
@@ -70,6 +70,15 @@ const modules: Record<UserRole, Module[]> = {
       icon: "takeaway",
     },
   ],
+  GERENTE_GENERAL: [
+    {
+      title: "Horarios pico",
+      href: "/gerente-general/reportes/horarios-pico",
+      description:
+        "Consulta las horas con más pedidos de cada sucursal.",
+      icon: "clock",
+    },
+  ],
 };
 
 const roleLabels: Record<UserRole, string> = {
@@ -77,13 +86,14 @@ const roleLabels: Record<UserRole, string> = {
   MESERO: "Mesero",
   COCINA: "Cocina",
   CLIENTE: "Cliente",
+  GERENTE_GENERAL: "Gerente general",
 };
 
 function Icon({
   name,
   size = 22,
 }: {
-  name: "home" | "menu" | "pos" | "takeaway" | "view" | "inventory" | "logout" | "arrow";
+  name: "home" | "menu" | "pos" | "takeaway" | "view" | "inventory" | "clock" | "logout" | "arrow";
   size?: number;
 }) {
   const props = {
@@ -99,6 +109,14 @@ function Icon({
   };
 
   switch (name) {
+    case "clock":
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+      );
+
     case "home":
       return (
         <svg {...props}>
