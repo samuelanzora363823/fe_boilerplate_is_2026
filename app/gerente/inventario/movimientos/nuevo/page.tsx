@@ -186,6 +186,7 @@ export default function RegistrarMovimientoPage() {
         throw new Error("No se pudieron cargar los insumos.");
       }
 
+      // Respuesta paginada de H15: { data, total, page, limit, lowStockCount, branch }.
       const datos: {
         data: Insumo[];
         branch: { id: string; name: string };
@@ -355,7 +356,7 @@ export default function RegistrarMovimientoPage() {
           </Link>
 
           <Link
-            href="/gerente/inventario/movimientos/nuevo"
+            href="/gerente/inventario"
             className="flex items-center gap-3 rounded-xl bg-[#7564e8] px-4 py-3 text-sm font-semibold text-white"
           >
             <Icono nombre="inventario" />

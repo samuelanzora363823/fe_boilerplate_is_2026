@@ -37,9 +37,9 @@ const modules: Record<UserRole, Module[]> = {
     },
     {
       title: "Inventario",
-      href: "/gerente/inventario/movimientos/nuevo",
+      href: "/gerente/inventario",
       description:
-        "Registra las entradas y salidas de insumos de tu sucursal.",
+        "Consulta las existencias y registra entradas y salidas de insumos.",
       icon: "inventory",
     },
   ],
