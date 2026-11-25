@@ -30,7 +30,56 @@ export async function consultarLealtad<T>(
   return datos as T;
 }
 
-export type SaldoLealtad = { balance: number };
+// H20: contrato de GET /loyalty/points/balance.
+// - totalPoints: puntos acumulados, incluidos los reservados.
+// - reservedPoints: puntos apartados por canjes pendientes de pago.
+// - availablePoints: puntos que el cliente puede usar ahora.
+// - balance: alias de totalPoints por compatibilidad; no usarlo como disponible.
+export type SaldoLealtad = {
+  totalPoints: number;
+  reservedPoints: number;
+  availablePoints: number;
+  balance: number;
+};
+
+function numeroNoNegativo(valor: unknown): number | null {
+  const numero = typeof valor === "string" && valor.trim() ? Number(valor) : valor;
+  return typeof numero === "number" && Number.isFinite(numero) && numero >= 0
+    ? numero
+    : null;
+}
+
+// Valida la respuesta del saldo. Devuelve null si falta availablePoints u otro
+// campo obligatorio, para no confundir el total con los puntos disponibles.
+export function normalizarSaldoLealtad(valor: unknown): SaldoLealtad | null {
+  if (valor === null || typeof valor !== "object" || Array.isArray(valor)) {
+    return null;
+  }
+
+  const datos = valor as Record<string, unknown>;
+  const totalPoints = numeroNoNegativo(datos.totalPoints);
+  const reservedPoints = numeroNoNegativo(datos.reservedPoints);
+  const availablePoints = numeroNoNegativo(datos.availablePoints);
+
+  if (totalPoints === null || reservedPoints === null || availablePoints === null) {
+    return null;
+  }
+
+  return {
+    totalPoints,
+    reservedPoints,
+    availablePoints,
+    balance: numeroNoNegativo(datos.balance) ?? totalPoints,
+  };
+}
+
+// Saldo de un cliente que todavía no tiene cuenta de puntos.
+export const SALDO_LEALTAD_VACIO: SaldoLealtad = {
+  totalPoints: 0,
+  reservedPoints: 0,
+  availablePoints: 0,
+  balance: 0,
+};
 
 export type BeneficioLealtad = {
   id: string;
@@ -61,13 +110,32 @@ export type SolicitudCanje = { benefitId: string } & CompraParaCanje;
 export type ResultadoCanje = {
   id: string;
   pointsRedeemed: number;
+  // Contrato anterior de POST /redemptions: no usarlo como saldo; volver a
+  // consultar GET /loyalty/points/balance después del canje.
   balance: number;
   discountApplied: number;
   status: "RESERVADO";
 };
 
-export function obtenerSaldoLealtad() {
-  return consultarLealtad<SaldoLealtad>("/api/cliente/loyalty/balance");
+// Consulta y valida el saldo. Un 404 (cliente sin cuenta de puntos) equivale a
+// saldo cero, igual que la respuesta actual del backend en ese caso.
+export async function obtenerSaldoLealtad(): Promise<SaldoLealtad> {
+  let datos: unknown;
+
+  try {
+    datos = await consultarLealtad<unknown>("/api/cliente/loyalty/balance");
+  } catch (error) {
+    if (error instanceof LoyaltyApiError && error.status === 404) {
+      return { ...SALDO_LEALTAD_VACIO };
+    }
+    throw error;
+  }
+
+  const saldo = normalizarSaldoLealtad(datos);
+  if (!saldo) {
+    throw new Error("No se pudo interpretar el saldo de puntos recibido.");
+  }
+  return saldo;
 }
 
 export function obtenerBeneficiosLealtad() {

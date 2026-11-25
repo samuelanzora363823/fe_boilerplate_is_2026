@@ -8,37 +8,76 @@ import {
   consultarLealtad,
   LoyaltyApiError,
   obtenerSaldoLealtad,
+  type SaldoLealtad,
 } from "@/lib/services/loyalty";
 
 type Movimiento = {
   id: string;
   fecha: string;
+  // Código del backend (LoyaltyMovementType), por ejemplo EARNED.
   tipo: string;
+  descripcion: string;
   puntos: number;
 };
+
+type Acreditacion = {
+  puntos: number;
+  fecha: string;
+};
+
+// Tipos de movimiento del backend traducidos al español. Hoy el backend solo
+// genera EARNED; los demás se incluyen por si el enum crece.
+const TIPOS_MOVIMIENTO: Record<string, string> = {
+  EARNED: "Puntos acumulados",
+  REDEEMED: "Puntos canjeados",
+  RESERVED: "Puntos reservados",
+  RELEASED: "Puntos liberados",
+  EXPIRED: "Puntos vencidos",
+  ADJUSTMENT: "Ajuste de puntos",
+};
+
+function etiquetaMovimiento(tipo: string) {
+  return TIPOS_MOVIMIENTO[tipo.toUpperCase()] ?? "Movimiento de puntos";
+}
+
+// Una acreditación se considera reciente durante 24 horas.
+const VENTANA_ACREDITACION_MS = 24 * 60 * 60 * 1000;
+
+// Devuelve la suma de los puntos acumulados en las últimas 24 horas, o null si
+// no hay ninguno. Se calcula al cargar, no en el render, porque usa la hora.
+function acreditacionReciente(
+  movimientos: Movimiento[],
+  ahora: number,
+): Acreditacion | null {
+  const recientes = movimientos.filter((movimiento) => {
+    const fecha = new Date(movimiento.fecha).getTime();
+    return (
+      movimiento.tipo.toUpperCase() === "EARNED" &&
+      movimiento.puntos > 0 &&
+      Number.isFinite(fecha) &&
+      ahora - fecha >= 0 &&
+      ahora - fecha <= VENTANA_ACREDITACION_MS
+    );
+  });
+
+  if (recientes.length === 0) return null;
+
+  const masReciente = recientes.reduce((actual, movimiento) =>
+    new Date(movimiento.fecha).getTime() > new Date(actual.fecha).getTime()
+      ? movimiento
+      : actual,
+  );
+
+  return {
+    puntos: recientes.reduce((total, movimiento) => total + movimiento.puntos, 0),
+    fecha: masReciente.fecha,
+  };
+}
 
 function objeto(valor: unknown): Record<string, unknown> | null {
   return valor !== null && typeof valor === "object" && !Array.isArray(valor)
     ? (valor as Record<string, unknown>)
     : null;
-}
-
-function extraerSaldo(valor: unknown): number | null {
-  if (typeof valor === "number" && Number.isFinite(valor)) return valor;
-  const respuesta = objeto(valor);
-  if (!respuesta) return null;
-
-  for (const clave of ["balance", "points", "availablePoints", "pointsBalance", "saldo"]) {
-    const candidato = respuesta[clave];
-    if (typeof candidato === "number" && Number.isFinite(candidato)) {
-      return candidato;
-    }
-    if (typeof candidato === "string" && candidato.trim() && Number.isFinite(Number(candidato))) {
-      return Number(candidato);
-    }
-  }
-
-  return null;
 }
 
 function extraerMovimientos(valor: unknown): Movimiento[] | null {
@@ -60,12 +99,14 @@ function extraerMovimientos(valor: unknown): Movimiento[] | null {
     const puntosRaw = item.points ?? item.amount ?? item.pointsDelta ?? 0;
     const puntos = Number(puntosRaw);
     const fechaRaw = item.date ?? item.createdAt ?? item.movementDate;
-    const tipoRaw = item.type ?? item.movementType ?? item.description;
+    const tipoRaw = item.type ?? item.movementType;
+    const descripcionRaw = item.description;
 
     return {
       id: String(item.id ?? indice),
       fecha: typeof fechaRaw === "string" ? fechaRaw : "",
-      tipo: typeof tipoRaw === "string" ? tipoRaw : "Movimiento",
+      tipo: typeof tipoRaw === "string" ? tipoRaw : "",
+      descripcion: typeof descripcionRaw === "string" ? descripcionRaw.trim() : "",
       puntos: Number.isFinite(puntos) ? puntos : 0,
     };
   });
@@ -81,30 +122,45 @@ function formatoFecha(valor: string) {
   }).format(fecha);
 }
 
-async function consultar<T>(url: string): Promise<T> {
-  try {
-    return await consultarLealtad<T>(url);
-  } catch (error) {
-    if (error instanceof LoyaltyApiError) {
-      if (error.status === 401) throw new Error("AUTH_REQUIRED");
-      if (error.status === 403) {
-        throw new Error("No tienes permiso para consultar esta información.");
-      }
-      if (error.status === 404) {
-        throw new Error("La información de puntos no está disponible.");
-      }
-      throw new Error(
-        error.message || "No se pudo consultar la información de puntos. Intenta de nuevo.",
-      );
+function errorLealtad(error: unknown): Error {
+  if (error instanceof LoyaltyApiError) {
+    if (error.status === 401) return new Error("AUTH_REQUIRED");
+    if (error.status === 403) {
+      return new Error("No tienes permiso para consultar esta información.");
     }
-    throw error;
+    return new Error(
+      error.message || "No se pudo consultar la información de puntos. Intenta de nuevo.",
+    );
+  }
+  return error instanceof Error
+    ? error
+    : new Error("No se pudo consultar la información de puntos. Intenta de nuevo.");
+}
+
+async function consultarSaldo(): Promise<SaldoLealtad> {
+  try {
+    // obtenerSaldoLealtad ya convierte el 404 (sin cuenta de puntos) en saldo cero.
+    return await obtenerSaldoLealtad();
+  } catch (error) {
+    throw errorLealtad(error);
+  }
+}
+
+async function consultarMovimientos(): Promise<unknown> {
+  try {
+    return await consultarLealtad<unknown>("/api/cliente/loyalty/movements");
+  } catch (error) {
+    // Un cliente sin cuenta de puntos no tiene movimientos: estado vacío.
+    if (error instanceof LoyaltyApiError && error.status === 404) return [];
+    throw errorLealtad(error);
   }
 }
 
 export default function PuntosPage() {
   const router = useRouter();
-  const [saldo, setSaldo] = useState<number | null>(null);
+  const [saldo, setSaldo] = useState<SaldoLealtad | null>(null);
   const [movimientos, setMovimientos] = useState<Movimiento[] | null>(null);
+  const [acreditacion, setAcreditacion] = useState<Acreditacion | null>(null);
   const [cargando, setCargando] = useState(true);
   const [errorSaldo, setErrorSaldo] = useState("");
   const [errorMovimientos, setErrorMovimientos] = useState("");
@@ -115,8 +171,8 @@ export default function PuntosPage() {
     async function cargar() {
       setCargando(true);
       const [resultadoSaldo, resultadoMovimientos] = await Promise.allSettled([
-        obtenerSaldoLealtad(),
-        consultar<unknown>("/api/cliente/loyalty/movements"),
+        consultarSaldo(),
+        consultarMovimientos(),
       ]);
 
       if (!activa) return;
@@ -135,13 +191,8 @@ export default function PuntosPage() {
       }
 
       if (resultadoSaldo.status === "fulfilled") {
-        const valor = extraerSaldo(resultadoSaldo.value);
-        if (valor === null) {
-          setErrorSaldo("No se pudo interpretar el saldo recibido.");
-        } else {
-          setSaldo(valor);
-          setErrorSaldo("");
-        }
+        setSaldo(resultadoSaldo.value);
+        setErrorSaldo("");
       } else {
         setErrorSaldo(
           resultadoSaldo.reason instanceof Error
@@ -156,6 +207,7 @@ export default function PuntosPage() {
           setErrorMovimientos("No se pudo interpretar el historial recibido.");
         } else {
           setMovimientos(lista);
+          setAcreditacion(acreditacionReciente(lista, Date.now()));
           setErrorMovimientos("");
         }
       } else {
@@ -175,11 +227,7 @@ export default function PuntosPage() {
     };
   }, [router]);
 
-  const hayAcreditacion = movimientos?.some((movimiento) => {
-    const tipo = movimiento.tipo.toLocaleLowerCase();
-    return movimiento.puntos > 0 &&
-      (tipo.includes("acredit") || tipo.includes("ganad") || tipo.includes("earn") || tipo.includes("credit"));
-  });
+  const formatoPuntos = (valor: number) => new Intl.NumberFormat("es").format(valor);
 
   return (
     <div className="min-h-screen bg-[#f5f6fb] text-slate-800 lg:flex">
@@ -196,9 +244,10 @@ export default function PuntosPage() {
             <CampanaNotificaciones />
           </header>
 
-          {hayAcreditacion && (
+          {acreditacion && (
             <div role="status" className="mb-6 rounded-2xl border border-green-200 bg-green-50 p-5 text-sm text-green-800">
-              Tienes puntos acreditados en tu historial.
+              Se acreditaron <strong>+{formatoPuntos(acreditacion.puntos)} puntos</strong> por tus compras recientes
+              (último movimiento: {formatoFecha(acreditacion.fecha)}).
             </div>
           )}
 
@@ -214,9 +263,24 @@ export default function PuntosPage() {
             {errorSaldo ? (
               <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{errorSaldo}</p>
             ) : saldo !== null ? (
-              <p className="mt-2 text-4xl font-bold tracking-tight text-[#20233e]">
-                {new Intl.NumberFormat("es").format(saldo)} <span className="text-lg font-semibold text-slate-500">puntos</span>
-              </p>
+              <>
+                <p className="mt-2 text-4xl font-bold tracking-tight text-[#20233e]">
+                  {formatoPuntos(saldo.availablePoints)} <span className="text-lg font-semibold text-slate-500">puntos</span>
+                </p>
+                <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm text-slate-500">
+                  <div className="flex gap-2">
+                    <dt>Total acumulado:</dt>
+                    <dd className="font-semibold text-slate-700">{formatoPuntos(saldo.totalPoints)} puntos</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt>Reservados en canjes:</dt>
+                    <dd className="font-semibold text-slate-700">{formatoPuntos(saldo.reservedPoints)} puntos</dd>
+                  </div>
+                </dl>
+                {saldo.totalPoints === 0 && (
+                  <p className="mt-3 text-sm text-slate-500">Aún no acumulas puntos. Los obtendrás con tus compras pagadas.</p>
+                )}
+              </>
             ) : !cargando ? (
               <p className="mt-3 text-sm text-slate-500">No hay saldo disponible para mostrar.</p>
             ) : null}
@@ -246,9 +310,14 @@ export default function PuntosPage() {
                     {movimientos.map((movimiento) => (
                       <tr key={movimiento.id}>
                         <td className="px-6 py-4 text-slate-600 sm:px-8">{formatoFecha(movimiento.fecha)}</td>
-                        <td className="px-6 py-4 font-medium text-[#252944]">{movimiento.tipo}</td>
+                        <td className="px-6 py-4 font-medium text-[#252944]">
+                          {etiquetaMovimiento(movimiento.tipo)}
+                          {movimiento.descripcion && movimiento.descripcion !== etiquetaMovimiento(movimiento.tipo) && (
+                            <span className="mt-0.5 block text-xs font-normal text-slate-500">{movimiento.descripcion}</span>
+                          )}
+                        </td>
                         <td className={`px-6 py-4 text-right font-semibold sm:px-8 ${movimiento.puntos > 0 ? "text-green-700" : "text-slate-600"}`}>
-                          {movimiento.puntos > 0 ? "+" : ""}{new Intl.NumberFormat("es").format(movimiento.puntos)}
+                          {movimiento.puntos > 0 ? "+" : ""}{formatoPuntos(movimiento.puntos)}
                         </td>
                       </tr>
                     ))}
