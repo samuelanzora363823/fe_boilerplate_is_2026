@@ -14,6 +14,7 @@ import {
   type BeneficioLealtad,
   type PedidoTakeawayCliente,
   type ResultadoCanje,
+  type SaldoLealtad,
 } from "@/lib/services/loyalty";
 
 function errorConsulta(error: unknown) {
@@ -57,7 +58,8 @@ function dinero(valor: number) {
 
 export default function BeneficiosPage() {
   const router = useRouter();
-  const [saldo, setSaldo] = useState<number | null>(null);
+  // Saldo completo; para decidir si se puede canjear se usa solo availablePoints.
+  const [saldoLealtad, setSaldoLealtad] = useState<SaldoLealtad | null>(null);
   const [beneficios, setBeneficios] = useState<BeneficioLealtad[]>([]);
   const [pedidos, setPedidos] = useState<PedidoTakeawayCliente[]>([]);
   const [seleccionado, setSeleccionado] = useState("");
@@ -99,7 +101,7 @@ export default function BeneficiosPage() {
 
       const errores: string[] = [];
       if (resultadoSaldo.status === "fulfilled") {
-        setSaldo(resultadoSaldo.value.balance);
+        setSaldoLealtad(resultadoSaldo.value);
       } else {
         errores.push(`Saldo: ${errorConsulta(resultadoSaldo.reason)}`);
       }
@@ -151,6 +153,9 @@ export default function BeneficiosPage() {
     return () => window.clearTimeout(timeout);
   }, [pedidosReservados]);
 
+  // Puntos que el cliente puede usar ahora (excluye los reservados).
+  const saldo = saldoLealtad?.availablePoints ?? null;
+
   const beneficioSeleccionado = beneficios.find(
     (beneficio) => beneficio.id === seleccionado,
   );
@@ -184,7 +189,8 @@ export default function BeneficiosPage() {
         orderId: compraSeleccionada.id,
       });
       setResultado(respuesta);
-      setSaldo(respuesta.balance);
+      // No se usa respuesta.balance: POST /redemptions conserva su contrato
+      // anterior. El saldo se vuelve a consultar abajo.
       queueMicrotask(() => {
         const horaCanje = Date.now();
         setAhora(horaCanje);
@@ -195,10 +201,20 @@ export default function BeneficiosPage() {
       });
       setPedidoSeleccionado("");
 
-      const [beneficiosActualizados, pedidosActualizados] = await Promise.allSettled([
+      const [saldoActualizado, beneficiosActualizados, pedidosActualizados] = await Promise.allSettled([
+        obtenerSaldoLealtad(),
         obtenerBeneficiosLealtad(),
         obtenerPedidosTakeawayCliente(),
       ]);
+      if (saldoActualizado.status === "fulfilled") {
+        setSaldoLealtad(saldoActualizado.value);
+      } else {
+        // El canje sí se registró; el saldo mostrado puede estar desactualizado.
+        setSaldoLealtad(null);
+        setErrorCanje(
+          "El canje se registró, pero no se pudo actualizar tu saldo. Recarga la página para consultarlo.",
+        );
+      }
       if (beneficiosActualizados.status === "fulfilled") {
         setBeneficios(
           beneficiosActualizados.value.items.filter((beneficio) => beneficio.active),
@@ -253,11 +269,16 @@ export default function BeneficiosPage() {
 
           <section className="mb-7 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#ddd6fe] bg-white p-6 shadow-sm sm:p-8">
             <div>
-              <p className="text-sm font-semibold text-[#7564e8]">Saldo de puntos</p>
-              {saldo !== null ? (
-                <p className="mt-2 text-4xl font-bold tracking-tight text-[#20233e]">
-                  {new Intl.NumberFormat("es").format(saldo)} <span className="text-lg font-semibold text-slate-500">puntos</span>
-                </p>
+              <p className="text-sm font-semibold text-[#7564e8]">Puntos disponibles</p>
+              {saldoLealtad !== null ? (
+                <>
+                  <p className="mt-2 text-4xl font-bold tracking-tight text-[#20233e]">
+                    {new Intl.NumberFormat("es").format(saldoLealtad.availablePoints)} <span className="text-lg font-semibold text-slate-500">puntos</span>
+                  </p>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Total acumulado: {new Intl.NumberFormat("es").format(saldoLealtad.totalPoints)} · Reservados: {new Intl.NumberFormat("es").format(saldoLealtad.reservedPoints)}
+                  </p>
+                </>
               ) : !cargando ? (
                 <p className="mt-2 text-sm text-slate-500">No se pudo cargar el saldo.</p>
               ) : null}
@@ -279,7 +300,9 @@ export default function BeneficiosPage() {
               <p className="mt-2 text-sm">Puntos reservados: <strong>{resultado.pointsRedeemed}</strong></p>
               <p className="mt-1 text-sm">Descuento aplicado: <strong>{dinero(resultado.discountApplied)}</strong></p>
               <p className="mt-1 text-sm">Estado: <strong>{resultado.status}</strong></p>
-              <p className="mt-1 text-sm">Saldo disponible: <strong>{resultado.balance} puntos</strong></p>
+              {!enviando && saldo !== null && (
+                <p className="mt-1 text-sm">Saldo disponible: <strong>{new Intl.NumberFormat("es").format(saldo)} puntos</strong></p>
+              )}
               <p className="mt-3 text-sm">La reserva se mantiene durante 15 minutos. Si no se completa el pago dentro de ese plazo, el backend libera los puntos.</p>
             </section>
           )}
@@ -377,7 +400,7 @@ export default function BeneficiosPage() {
                 Beneficio seleccionado: <strong>{beneficioSeleccionado.name}</strong>
               </p>
               <p className="mt-3 text-xs text-slate-500">
-                El endpoint de saldo devuelve el balance total; el backend valida los puntos realmente disponibles al solicitar el canje.
+                Se usan tus puntos disponibles (sin contar los reservados); el backend vuelve a validarlos al solicitar el canje.
               </p>
               {puntosInsuficientes && (
                 <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
