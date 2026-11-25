@@ -1,6 +1,62 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+// Mensaje cuando la sesión activa no es de Cocina (por ejemplo, otro rol
+// inició sesión en el mismo navegador y reemplazó la cookie).
+const SESION_NO_COCINA =
+  "La sesión actual no corresponde al rol Cocina. Inicia sesión con una cuenta de cocina.";
+
+// Error de una respuesta HTTP que conserva su código para distinguir
+// sesión vencida (401) y rol sin permiso (403) del resto de errores.
+class ErrorHttp extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ErrorHttp";
+  }
+}
+
+// Estados que el backend usa para comandas y platillos.
+type EstadoPedido =
+  | "RECEIVED"
+  | "IN_PREPARATION"
+  | "READY"
+  | "CANCELLED";
+
+const ETIQUETAS_ESTADO: Record<EstadoPedido, string> = {
+  RECEIVED: "Recibido",
+  IN_PREPARATION: "En preparación",
+  READY: "Listo",
+  CANCELLED: "Cancelado",
+};
+
+const ESTILOS_ESTADO: Record<EstadoPedido, string> = {
+  RECEIVED: "bg-yellow-50 text-yellow-700",
+  IN_PREPARATION: "bg-orange-50 text-orange-700",
+  READY: "bg-green-50 text-green-700",
+  CANCELLED: "bg-slate-100 text-slate-500",
+};
+
+function normalizarEstado(valor: unknown): EstadoPedido | null {
+  return typeof valor === "string" && valor in ETIQUETAS_ESTADO
+    ? (valor as EstadoPedido)
+    : null;
+}
+
+function etiquetaEstado(valor: unknown): string {
+  const estado = normalizarEstado(valor);
+  return estado ? ETIQUETAS_ESTADO[estado] : "Estado desconocido";
+}
+
+function estiloEstado(valor: unknown): string {
+  const estado = normalizarEstado(valor);
+  return estado ? ESTILOS_ESTADO[estado] : "bg-slate-100 text-slate-600";
+}
 
 type Comanda = {
   id: string;
@@ -19,6 +75,7 @@ type OrderItem = {
   id: string;
   dishId: string;
   quantity: number;
+  // Valor crudo del backend (EstadoPedido); se interpreta con normalizarEstado().
   status: string;
   dish: {
     name: string;
@@ -31,6 +88,7 @@ type OrderItem = {
 
 type KitchenOrder = {
   id: string;
+  orderNumber?: string | null;
   branchId: string;
   status: string;
   createdAt: string;
@@ -96,7 +154,7 @@ async function apiH8(path: string, body?: unknown) {
   const datos = await leerRespuesta(response);
 
   if (!response.ok) {
-    throw new Error(obtenerError(datos, response.status));
+    throw new ErrorHttp(obtenerError(datos, response.status), response.status);
   }
 
   return datos;
@@ -133,8 +191,12 @@ export default function KitchenOrders() {
   const [comandas, setComandas] = useState<Comanda[]>([]);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [cargando, setCargando] = useState(true);
-  const [errorH7, setErrorH7] = useState("");
-  const [errorH8, setErrorH8] = useState("");
+  // Errores de carga: los reemplaza o limpia cada consulta automática.
+  const [errorCargaH7, setErrorCargaH7] = useState("");
+  const [errorCargaH8, setErrorCargaH8] = useState("");
+  // Errores de acciones: solo se limpian al iniciar otra acción.
+  const [errorAccionH7, setErrorAccionH7] = useState("");
+  const [errorAccionH8, setErrorAccionH8] = useState("");
   const [errorH9, setErrorH9] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [procesandoId, setProcesandoId] = useState<string | null>(null);
@@ -144,7 +206,69 @@ export default function KitchenOrders() {
 
   const [agotados, setAgotados] = useState<Set<string>>(new Set());
 
+  // Bloqueo síncrono contra doble clic: el estado de React no se actualiza
+  // hasta el siguiente render, así que dos clics seguidos verían null.
+  const accionEnCurso = useRef(false);
+
+  // Secuencia de consultas: solo se aplica la respuesta más reciente.
+  const secuenciaComandas = useRef(0);
+  const secuenciaPreparacion = useRef(0);
+
+  // Descarta las consultas en vuelo iniciadas antes de una acción.
+  const invalidarConsultas = () => {
+    secuenciaComandas.current += 1;
+    secuenciaPreparacion.current += 1;
+  };
+
+  const iniciarAccion = (id: string) => {
+    if (accionEnCurso.current) return false;
+    accionEnCurso.current = true;
+    invalidarConsultas();
+    setProcesandoId(id);
+    setMensaje("");
+    return true;
+  };
+
+  const terminarAccion = () => {
+    accionEnCurso.current = false;
+    setProcesandoId(null);
+  };
+
+  const router = useRouter();
+  const redirigiendo = useRef(false);
+
+  // Sesión de las consultas automáticas:
+  // - 401 (token vencido o inválido): se vuelve a iniciar sesión.
+  // - 403 (la sesión no es de Cocina): se vacían ambas listas para no
+  //   mostrar datos viejos como si siguieran vigentes.
+  // Devuelve true si el error ya quedó atendido.
+  const manejarAccesoDenegado = useCallback(
+    (err: unknown) => {
+      if (!(err instanceof ErrorHttp)) return false;
+
+      if (err.status === 401) {
+        if (!redirigiendo.current) {
+          redirigiendo.current = true;
+          router.replace("/login");
+        }
+        return true;
+      }
+
+      if (err.status === 403) {
+        setComandas([]);
+        setOrders([]);
+        setErrorCargaH7(SESION_NO_COCINA);
+        setErrorCargaH8(SESION_NO_COCINA);
+        return true;
+      }
+
+      return false;
+    },
+    [router],
+  );
+
   const cargarComandas = useCallback(async (inicial = false) => {
+    const solicitud = ++secuenciaComandas.current;
     if (inicial) setCargando(true);
 
     try {
@@ -156,8 +280,10 @@ export default function KitchenOrders() {
 
       const datos = await leerRespuesta(response);
 
+      if (solicitud !== secuenciaComandas.current) return;
+
       if (!response.ok) {
-        throw new Error(obtenerError(datos, response.status));
+        throw new ErrorHttp(obtenerError(datos, response.status), response.status);
       }
 
       if (
@@ -179,9 +305,12 @@ export default function KitchenOrders() {
         ),
       );
 
-      setErrorH7("");
+      setErrorCargaH7("");
     } catch (err) {
-      setErrorH7(
+      if (solicitud !== secuenciaComandas.current) return;
+      if (manejarAccesoDenegado(err)) return;
+
+      setErrorCargaH7(
         err instanceof Error
           ? err.message
           : "No se pudieron cargar las comandas recibidas.",
@@ -189,11 +318,15 @@ export default function KitchenOrders() {
     } finally {
       if (inicial) setCargando(false);
     }
-  }, []);
+  }, [manejarAccesoDenegado]);
 
   const cargarPreparacion = useCallback(async () => {
+    const solicitud = ++secuenciaPreparacion.current;
+
     try {
       const datos = await apiH8("orders/in-preparation");
+
+      if (solicitud !== secuenciaPreparacion.current) return;
 
       const items = Array.isArray(datos)
         ? datos
@@ -205,15 +338,18 @@ export default function KitchenOrders() {
           : [];
 
       setOrders(items as KitchenOrder[]);
-      setErrorH8("");
+      setErrorCargaH8("");
     } catch (err) {
-      setErrorH8(
+      if (solicitud !== secuenciaPreparacion.current) return;
+      if (manejarAccesoDenegado(err)) return;
+
+      setErrorCargaH8(
         err instanceof Error
           ? err.message
           : "No se pudieron cargar las comandas en preparación.",
       );
     }
-  }, []);
+  }, [manejarAccesoDenegado]);
 
   const actualizarPanel = useCallback(async (inicial = false) => {
     await Promise.all([
@@ -238,11 +374,9 @@ export default function KitchenOrders() {
   }, [actualizarPanel]);
 
   const tomarComanda = async (id: string) => {
-    if (procesandoId) return;
+    if (!iniciarAccion(id)) return;
 
-    setProcesandoId(id);
-    setErrorH7("");
-    setMensaje("");
+    setErrorAccionH7("");
 
     try {
       const response = await fetch(
@@ -258,8 +392,7 @@ export default function KitchenOrders() {
 
       if (response.status === 409) {
         throw new Error(
-          obtenerError(datos, 409) ||
-            "Otra persona ya tomó esta comanda.",
+          `${obtenerError(datos, 409)} Otra persona pudo haberla tomado; la lista se actualizó.`,
         );
       }
 
@@ -268,17 +401,18 @@ export default function KitchenOrders() {
       }
 
       setMensaje("Comanda tomada correctamente. ¡A preparar!");
-      await actualizarPanel();
     } catch (err) {
-      setErrorH7(
+      setErrorAccionH7(
         err instanceof Error
           ? err.message
           : "No se pudo tomar la comanda.",
       );
-
-      await cargarComandas();
     } finally {
-      setProcesandoId(null);
+      // Tras éxito o conflicto se recargan ambas listas con los estados reales
+      // del backend antes de liberar los botones. Los errores de acción no se
+      // borran con esta recarga.
+      await actualizarPanel();
+      terminarAccion();
     }
   };
 
@@ -288,9 +422,9 @@ export default function KitchenOrders() {
   ) => {
     const key = `${orderId}-${itemId}`;
 
-    setProcesandoId(key);
-    setErrorH8("");
-    setMensaje("");
+    if (!iniciarAccion(key)) return;
+
+    setErrorAccionH8("");
 
     try {
       await apiH8(
@@ -299,27 +433,28 @@ export default function KitchenOrders() {
       );
 
       setMensaje("Platillo marcado como listo.");
-      await actualizarPanel();
     } catch (err) {
-      setErrorH8(
+      setErrorAccionH8(
         err instanceof Error
           ? err.message
           : "No se pudo actualizar el platillo.",
       );
     } finally {
-      setProcesandoId(null);
+      // Recarga con los estados reales antes de liberar los botones.
+      await actualizarPanel();
+      terminarAccion();
     }
   };
 
   const confirmarPlatilloAgotado = async () => {
-    if (!platilloSeleccionado || procesandoId) return;
+    if (!platilloSeleccionado) return;
 
     const { dishId, branchId, dishName } = platilloSeleccionado;
     const key = `${branchId}-${dishId}`;
 
-    setProcesandoId(key);
+    if (!iniciarAccion(key)) return;
+
     setErrorH9("");
-    setMensaje("");
 
     try {
       await apiH9(dishId, branchId);
@@ -335,7 +470,6 @@ export default function KitchenOrders() {
       );
 
       setPlatilloSeleccionado(null);
-      await actualizarPanel();
     } catch (err) {
       setErrorH9(
         err instanceof Error
@@ -343,14 +477,16 @@ export default function KitchenOrders() {
           : "No se pudo marcar el platillo como agotado.",
       );
     } finally {
-      setProcesandoId(null);
+      // Recarga con los estados reales antes de liberar los botones.
+      await actualizarPanel();
+      terminarAccion();
     }
   };
 
   const marcarComandaLista = async (orderId: string) => {
-    setProcesandoId(orderId);
-    setErrorH8("");
-    setMensaje("");
+    if (!iniciarAccion(orderId)) return;
+
+    setErrorAccionH8("");
 
     try {
       await apiH8(`orders/${orderId}/status`, {
@@ -358,15 +494,16 @@ export default function KitchenOrders() {
       });
 
       setMensaje("¡Comanda marcada como lista!");
-      await actualizarPanel();
     } catch (err) {
-      setErrorH8(
+      setErrorAccionH8(
         err instanceof Error
           ? err.message
           : "No se pudo marcar la comanda como lista.",
       );
     } finally {
-      setProcesandoId(null);
+      // Recarga con los estados reales antes de liberar los botones.
+      await actualizarPanel();
+      terminarAccion();
     }
   };
 
@@ -374,10 +511,13 @@ export default function KitchenOrders() {
     (total, order) =>
       total +
       order.items.filter(
-        (item) => item.status === "IN_PREPARATION",
+        (item) => normalizarEstado(item.status) === "IN_PREPARATION",
       ).length,
     0,
   );
+
+  const erroresH7 = [errorAccionH7, errorCargaH7].filter(Boolean);
+  const erroresH8 = [errorAccionH8, errorCargaH8].filter(Boolean);
 
   return (
     <div className="min-h-screen bg-[#f5f6fb] text-[#252944] lg:flex">
@@ -397,12 +537,12 @@ export default function KitchenOrders() {
         </div>
 
         <nav className="flex gap-2 overflow-x-auto p-4 lg:flex-col">
-          <a
+          <Link
             href="/"
             className="rounded-xl px-4 py-3 text-sm text-slate-300 hover:bg-white/10"
           >
             Inicio
-          </a>
+          </Link>
           <a
             href="/cocina"
             className="rounded-xl bg-[#7564e8] px-4 py-3 text-sm font-semibold text-white"
@@ -502,14 +642,15 @@ export default function KitchenOrders() {
               </p>
             </div>
 
-            {errorH7 && (
+            {erroresH7.map((error, indice) => (
               <div
+                key={`${indice}-${error}`}
                 role="alert"
                 className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
               >
-                {errorH7}
+                {error}
               </div>
-            )}
+            ))}
 
             {cargando ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
@@ -534,16 +675,20 @@ export default function KitchenOrders() {
                     <div className="mb-4 flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm text-slate-500">
-                          Mesa {comanda.tableNumber ?? "Sin mesa"}
+                          {comanda.tableNumber
+                            ? `Mesa ${comanda.tableNumber}`
+                            : "Para llevar"}
                         </p>
                         <h3 className="mt-1 text-xl font-bold text-[#20233e]">
                           Comanda #
-                          {comanda.orderNumber ?? comanda.id.slice(0, 8)}
+                          {comanda.orderNumber ?? shortId(comanda.id)}
                         </h3>
                       </div>
 
-                      <span className="rounded-full bg-yellow-50 px-3 py-1 text-xs font-semibold text-yellow-700">
-                        Recibido
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${estiloEstado(comanda.status)}`}
+                      >
+                        {etiquetaEstado(comanda.status)}
                       </span>
                     </div>
 
@@ -587,14 +732,15 @@ export default function KitchenOrders() {
               </p>
             </div>
 
-            {errorH8 && (
+            {erroresH8.map((error, indice) => (
               <div
+                key={`${indice}-${error}`}
                 role="alert"
                 className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
               >
-                {errorH8}
+                {error}
               </div>
-            )}
+            ))}
 
             {errorH9 && (
               <div
@@ -617,10 +763,13 @@ export default function KitchenOrders() {
             ) : (
               <div className="space-y-6">
                 {orders.map((order) => {
+                  // Debe coincidir con KitchenService.markOrderReady: el
+                  // backend exige que TODOS los platillos estén en READY
+                  // (incluidos los cancelados), así que no se excluyen aquí.
                   const allReady =
                     order.items.length > 0 &&
                     order.items.every(
-                      (item) => item.status === "READY",
+                      (item) => normalizarEstado(item.status) === "READY",
                     );
 
                   return (
@@ -634,34 +783,47 @@ export default function KitchenOrders() {
                             Comanda
                           </p>
                           <h3 className="mt-1 text-lg font-bold text-[#20233e]">
-                            #{shortId(order.id)}
+                            #{order.orderNumber ?? shortId(order.id)}
                           </h3>
                           <p className="mt-1 text-sm text-slate-500">
                             {order.account?.table?.number
                               ? `Mesa ${order.account.table.number}`
-                              : "Pedido sin mesa"}
+                              : "Para llevar"}
                           </p>
                         </div>
 
-                        <span className="rounded-full bg-orange-50 px-4 py-2 text-xs font-semibold text-orange-700">
-                          En preparación
+                        <span
+                          className={`rounded-full px-4 py-2 text-xs font-semibold ${estiloEstado(order.status)}`}
+                        >
+                          {etiquetaEstado(order.status)}
                         </span>
                       </div>
 
                       <div className="space-y-3">
                         {order.items.map((item) => {
-                          const ready = item.status === "READY";
+                          const estado = normalizarEstado(item.status);
+                          const ready = estado === "READY";
                           const key = `${order.id}-${item.id}`;
                           const stockKey = `${order.branchId}-${item.dishId}`;
+                          // Disponibilidad del platillo en la sucursal; es
+                          // independiente del estado de este platillo.
                           const agotado =
-  item.dish.branchDishes.some(
-    (branchDish) =>
-      branchDish.branchId === order.branchId &&
-      branchDish.stockStatus === "OUT_OF_STOCK",
-  ) || agotados.has(stockKey);
-                          const itemProcesando =
-                            procesandoId === key ||
-                            procesandoId === stockKey;
+                            item.dish.branchDishes.some(
+                              (branchDish) =>
+                                branchDish.branchId === order.branchId &&
+                                branchDish.stockStatus === "OUT_OF_STOCK",
+                            ) || agotados.has(stockKey);
+                          // El backend solo acepta terminar platillos en
+                          // preparación. Un platillo agotado que ya forma
+                          // parte de la comanda se puede terminar.
+                          const puedeTerminar =
+                            estado === "IN_PREPARATION" &&
+                            procesandoId === null;
+                          const puedeMarcarAgotado =
+                            !agotado &&
+                            (estado === "RECEIVED" ||
+                              estado === "IN_PREPARATION") &&
+                            procesandoId === null;
 
                           return (
                             <div
@@ -675,31 +837,25 @@ export default function KitchenOrders() {
                                 <p className="mt-1 text-xs text-slate-500">
                                   Cantidad: {item.quantity}
                                 </p>
-                                <span
-                                  className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                                    agotado
-                                      ? "bg-red-50 text-red-700"
-                                      : ready
-                                        ? "bg-green-50 text-green-700"
-                                        : "bg-orange-50 text-orange-700"
-                                  }`}
-                                >
-                                  {agotado
-                                    ? "Agotado"
-                                    : ready
-                                      ? "Listo"
-                                      : "En preparación"}
-                                </span>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <span
+                                    className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${estiloEstado(item.status)}`}
+                                  >
+                                    {etiquetaEstado(item.status)}
+                                  </span>
+
+                                  {agotado && (
+                                    <span className="inline-block rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+                                      Agotado en sucursal
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   type="button"
-                                  disabled={
-                                    ready ||
-                                    agotado ||
-                                    procesandoId !== null
-                                  }
+                                  disabled={!puedeTerminar}
                                   onClick={() =>
                                     void marcarPlatilloListo(
                                       order.id,
@@ -717,11 +873,7 @@ export default function KitchenOrders() {
 
                                 <button
                                   type="button"
-                                  disabled={
-                                    ready ||
-                                    agotado ||
-                                    procesandoId !== null
-                                  }
+                                  disabled={!puedeMarcarAgotado}
                                   onClick={() => {
                                     setErrorH9("");
                                     setPlatilloSeleccionado({
@@ -732,7 +884,7 @@ export default function KitchenOrders() {
                                   }}
                                   className="rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
-                                  {itemProcesando && !ready
+                                  {procesandoId === stockKey
                                     ? "Procesando..."
                                     : agotado
                                       ? "Agotado"
