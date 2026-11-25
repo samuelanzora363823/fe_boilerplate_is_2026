@@ -55,8 +55,10 @@ async function handle(
     );
   }
 
+  let response: Response;
+
   try {
-    const response = await fetch(`${api}/${endpoint}`, {
+    response = await fetch(`${api}/${endpoint}`, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -69,16 +71,49 @@ async function handle(
         : {}),
       cache: "no-store",
     });
-
-    const data = await response.json();
-
-    return NextResponse.json(data, {
-      status: response.status,
-    });
   } catch {
+    // Solo los fallos de red se reportan como 502.
     return NextResponse.json(
       { message: "No se pudo conectar con NestJS" },
       { status: 502 },
+    );
+  }
+
+  return reenviarRespuesta(response);
+}
+
+// Reenvía la respuesta del backend conservando su código HTTP real,
+// aunque el cuerpo esté vacío o no sea JSON.
+async function reenviarRespuesta(response: Response) {
+  const status = response.status;
+
+  // Estas respuestas no pueden llevar cuerpo.
+  if (status === 204 || status === 205 || status === 304) {
+    return new NextResponse(null, { status });
+  }
+
+  let texto = "";
+
+  try {
+    texto = await response.text();
+  } catch {
+    texto = "";
+  }
+
+  if (!texto) {
+    return new NextResponse(null, { status });
+  }
+
+  try {
+    return NextResponse.json(JSON.parse(texto) as unknown, { status });
+  } catch {
+    return NextResponse.json(
+      {
+        message: response.ok
+          ? texto
+          : `Respuesta no válida del servidor (HTTP ${status}).`,
+      },
+      { status },
     );
   }
 }
