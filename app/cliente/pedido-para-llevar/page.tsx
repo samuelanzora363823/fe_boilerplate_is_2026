@@ -1,7 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  obtenerPedidosTakeawayCliente,
+  type PedidoTakeawayCliente,
+} from "@/lib/services/loyalty";
 
 type Branch = {
   id: string;
@@ -26,6 +30,8 @@ type Result = {
   orderId: string;
   orderNumber: string;
   status: string;
+  // true cuando se abrió un pedido pendiente ya registrado (no recién creado).
+  existente?: boolean;
 };
 
 type TakeawayDetail = {
@@ -213,6 +219,36 @@ export default function TakeawayPage() {
   const [paymentError, setPaymentError] = useState("");
   const [paymentMessage, setPaymentMessage] = useState("");
   const [receipt, setReceipt] = useState<TakeawayReceipt | null>(null);
+  // Pedidos para llevar propios que siguen pendientes de pago.
+  const [pendientes, setPendientes] = useState<PedidoTakeawayCliente[]>([]);
+  const [cargandoPendientes, setCargandoPendientes] = useState(true);
+  const [errorPendientes, setErrorPendientes] = useState("");
+
+  // El backend (GET /orders/takeaway/mine) solo devuelve pedidos del cliente
+  // autenticado; aquí se muestran únicamente los que esperan pago.
+  const cargarPendientes = useCallback(async () => {
+    setCargandoPendientes(true);
+    setErrorPendientes("");
+    try {
+      const pedidos = await obtenerPedidosTakeawayCliente();
+      setPendientes(
+        (Array.isArray(pedidos) ? pedidos : []).filter(
+          (pedido) => pedido.status === "PENDING_PAYMENT"
+        )
+      );
+    } catch {
+      setErrorPendientes("No se pudieron cargar tus pedidos pendientes de pago.");
+    } finally {
+      setCargandoPendientes(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Se difiere para no llamar setState de forma síncrona dentro del efecto.
+    queueMicrotask(() => {
+      void cargarPendientes();
+    });
+  }, [cargarPendientes]);
 
   const total = useMemo(
     () =>
@@ -428,6 +464,38 @@ export default function TakeawayPage() {
     }
   }
 
+  // Vuelve a consultar el detalle tras un pago aprobado sin ocultar la
+  // pantalla actual; si falla, se conserva el detalle mostrado.
+  async function refrescarEstadoPedido(orderId: string) {
+    try {
+      const response = await fetch(
+        `/api/cliente/takeaway/${encodeURIComponent(orderId)}`,
+        { method: "GET", cache: "no-store" }
+      );
+      if (!response.ok) return;
+      setDetail((await response.json()) as TakeawayDetail);
+    } catch {
+      // El comprobante ya confirma el pago; el estado se verá al recargar.
+    }
+  }
+
+  // Abre un pedido pendiente existente y reutiliza el detalle y el
+  // formulario de pago; no crea un pedido nuevo.
+  function seleccionarPendiente(pedido: PedidoTakeawayCliente) {
+    setError("");
+    setCardLast4("");
+    setPaymentError("");
+    setPaymentMessage("");
+    setReceipt(null);
+    setResult({
+      orderId: pedido.id,
+      orderNumber: pedido.orderNumber,
+      status: pedido.status,
+      existente: true,
+    });
+    void loadTakeawayDetail(pedido.id);
+  }
+
   async function payTakeawayOrder() {
     if (!result || !/^(4242|0002)$/.test(cardLast4) || paymentBusy || receipt) {
       return;
@@ -470,6 +538,11 @@ export default function TakeawayPage() {
       if (data.status === "APPROVED" && data.receipt) {
         setReceipt(data.receipt);
         setPaymentMessage("Pago aprobado");
+        // Refleja el nuevo estado del pedido y lo quita de los pendientes.
+        await Promise.all([
+          refrescarEstadoPedido(result.orderId),
+          cargarPendientes(),
+        ]);
         return;
       }
 
@@ -539,6 +612,7 @@ export default function TakeawayPage() {
     setPaymentError("");
     setPaymentMessage("");
     setReceipt(null);
+    void cargarPendientes();
   }
 
   return (
@@ -659,7 +733,11 @@ export default function TakeawayPage() {
                   <Icon name="check" size={34} />
                 </div>
                 <h2 className="text-2xl font-bold text-[#20233e]">
-                  {receipt ? "¡Pago completado!" : "¡Pedido registrado!"}
+                  {receipt
+                    ? "¡Pago completado!"
+                    : result.existente
+                      ? "Pedido pendiente de pago"
+                      : "¡Pedido registrado!"}
                 </h2>
                 <p className="mt-2 text-sm text-slate-500">
                   {receipt
@@ -822,12 +900,79 @@ export default function TakeawayPage() {
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
                 >
                   <Icon name="plus" size={18} />
-                  Realizar otro pedido
+                  {result.existente && !receipt
+                    ? "Volver a mis pedidos"
+                    : "Realizar otro pedido"}
                 </button>
               </div>
             </section>
           ) : (
             <>
+              {/* PEDIDOS PENDIENTES DE PAGO (registrados anteriormente) */}
+              {(cargandoPendientes || errorPendientes || pendientes.length > 0) && (
+                <section className="mb-6 rounded-2xl border border-amber-200 bg-white p-6 shadow-sm">
+                  <div className="mb-5 flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
+                      <Icon name="bag" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-[#20233e]">
+                        Pedidos pendientes de pago
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        Pedidos que ya registraste y aún no has pagado. Selecciona uno para revisar su detalle y pagarlo.
+                      </p>
+                    </div>
+                  </div>
+
+                  {cargandoPendientes ? (
+                    <p className="text-sm text-slate-500">Cargando tus pedidos pendientes...</p>
+                  ) : errorPendientes ? (
+                    <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                      {errorPendientes}
+                      <button
+                        type="button"
+                        onClick={() => void cargarPendientes()}
+                        className="ml-2 font-semibold underline"
+                      >
+                        Reintentar
+                      </button>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-slate-100">
+                      {pendientes.map((pedido) => (
+                        <li
+                          key={pedido.id}
+                          className="flex flex-wrap items-center justify-between gap-3 py-3"
+                        >
+                          <div>
+                            <p className="font-semibold text-[#252944]">
+                              Pedido {pedido.orderNumber}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Registrado el{" "}
+                              {new Date(pedido.createdAt).toLocaleString("es-SV", {
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                              })}{" "}
+                              · Subtotal {money(pedido.total)} (sin IVA)
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => seleccionarPendiente(pedido)}
+                            disabled={busy}
+                            className="rounded-xl bg-[#7564e8] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#6250d5] disabled:opacity-50"
+                          >
+                            Ver detalle y pagar
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
+
               {/* SUCURSAL */}
               <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="mb-5 flex items-center gap-3">
