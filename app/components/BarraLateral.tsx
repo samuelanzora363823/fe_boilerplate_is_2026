@@ -20,6 +20,7 @@ const opcionesPorRol: Record<RolUsuario, Opcion[]> = {
     { titulo: "Inicio", href: "/", icono: "inicio" },
     { titulo: "Menú", href: "/gerente/menu", icono: "menu" },
     { titulo: "Inventario", href: "/gerente/inventario", icono: "inventario" },
+    { titulo: "Fidelización", href: "/gerente/fidelizacion", icono: "beneficios" },
     { titulo: "Ventas", href: "/gerente/reportes/ventas", icono: "ventas" },
     { titulo: "Platillos más vendidos", href: "/gerente/reportes/platillos", icono: "estrella" },
     { titulo: "Horarios pico", href: "/gerente/reportes/horarios-pico", icono: "reloj" },
